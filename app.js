@@ -1,5 +1,15 @@
-const http = require('http');
 const config = require('./config');
+if (config.APP_PORT === undefined) {
+    console.log('Please, provide APP_PORT');
+    return;
+}
+  
+if (config.ENV === undefined){
+    console.log('Please, provide ENV');
+    return;
+}
+
+const http = require('http');
 
 const message = `Listening on port: ${config.APP_PORT}. ENV is ${config.ENV}`;
 http.createServer((request, response) => {
