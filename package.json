@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/1lyan/nodejs_app/issues"
   },
-  "homepage": "https://github.com/1lyan/nodejs_app#readme"
+  "homepage": "https://github.com/1lyan/nodejs_app#readme",
+  "devDependencies": {
+    "yargs": "17.2.1"
+  }
 }

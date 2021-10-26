@@ -1,19 +1,22 @@
+const http = require('http');
 const config = require('./config');
+const log = require('./logger');
+
 if (config.APP_PORT === undefined) {
-    console.log('Please, provide APP_PORT');
+    log('Please, provide APP_PORT');
     return;
 }
   
 if (config.ENV === undefined){
-    console.log('Please, provide ENV');
+    log('Please, provide ENV');
     return;
 }
 
-const http = require('http');
-
+const contentTypeHeader = { 'Content-Type': 'application/json' };
 const message = `Listening on port: ${config.APP_PORT}. ENV is ${config.ENV}`;
+
 http.createServer((request, response) => {
-    console.log('New incoming request');
-    response.writeHeader(200, { 'Content-Type': 'application/json' });
+    log('New incoming request');
+    response.writeHeader(200, contentTypeHeader);
     response.end(JSON.stringify({ message: 'Hello, world!' }));
-}).listen(config.APP_PORT, () => console.log(message));
+}).listen(config.APP_PORT, () => log(message));
