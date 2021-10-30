@@ -1,0 +1,22 @@
+{
+  "name": "nodejs_app",
+  "version": "1.0.0",
+  "description": "Practical task for nodejs course",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/1lyan/nodejs_app.git"
+  },
+  "author": "1lyan",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/1lyan/nodejs_app/issues"
+  },
+  "homepage": "https://github.com/1lyan/nodejs_app#readme",
+  "devDependencies": {
+    "yargs": "17.2.1"
+  }
+}
