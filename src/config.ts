@@ -1,6 +1,5 @@
 const yargs = require('yargs');
-
-module.exports = {
+export const config = {
   APP_PORT: process.env.APP_PORT,
   ENV: yargs.argv._[0],
 };
