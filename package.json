@@ -4,7 +4,10 @@
   "description": "Practical task for nodejs course",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "npx tsc",
+    "start": "node ./dist/server.js",
+    "help": "echo \"To start the app, run (for instance): APP_PORT=3000 npm run start QA\""
   },
   "repository": {
     "type": "git",

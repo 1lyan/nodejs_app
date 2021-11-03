@@ -2,8 +2,8 @@ import { createServer, IncomingMessage, ServerResponse } from 'http';
 import { config } from './config';
 import { logger } from './logger';
 import { noAppPortMsg, noEnvMsg } from './constants';
-import GetCommand from './commands/getCommand';
-import PostCommand from './commands/postCommand';
+import getCommand from './commands/getCommand';
+import postCommand from './commands/postCommand';
 
 if (config.APP_PORT === undefined) {
     logger.info(noAppPortMsg);
@@ -25,11 +25,11 @@ createServer((request: IncomingMessage, response: ServerResponse) => {
     response.writeHead(200, contentTypeHeader);
     switch(request.method){
         case 'GET':
-            new GetCommand(request, response).run();
+            getCommand(request, response);
         break;
 
         case 'POST':
-            new PostCommand(request, response).run();
+            postCommand(request, response);
         break;
     }
 
