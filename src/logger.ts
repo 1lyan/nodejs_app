@@ -1,4 +1,4 @@
-const pino = require('pino')();
+const pino = require("pino")();
 
 export const logger = {
   log: (...msg: any) => {
@@ -9,5 +9,5 @@ export const logger = {
   },
   fatal: (msg: string) => {
     pino.fatal(msg);
-  }
-}
+  },
+};
