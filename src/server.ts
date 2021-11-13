@@ -1,10 +1,10 @@
 import express from "express";
-import { Request, Response, NextFunction } from "express";
-import { STATUS_CODES } from "http";
+import { Request, Response } from "express";
 import { config } from "./config";
 import { logger } from "./logger";
 import { noAppPortMsg, noEnvMsg, noApiKeyMsg } from "./constants";
 import OmdbService from "./services/omdbService";
+import MovieStore from "./stores/movieStore";
 
 if (config.API_KEY === undefined) {
   logger.info(noApiKeyMsg);
@@ -24,7 +24,7 @@ if (config.ENV === undefined) {
 const app = express();
 app.use(express.json());
 
-const MOVIES: Array<{}> = [];
+const movieStore = new MovieStore();
 const listenMessage = `Listening on port: ${config.APP_PORT}. ENV is ${config.ENV}`;
 
 /**
@@ -34,22 +34,84 @@ const listenMessage = `Listening on port: ${config.APP_PORT}. ENV is ${config.EN
  * 4. List all movies
  * 5. Get movie by ID
  * */
-app.post('/movies', async (request: Request, response: Response) => {
-  let title: string = request.body.title;
-  const data = await OmdbService.getMovie(title);
+app.post("/movies", async (request: Request, response: Response) => {
+  const name = request.body.name;
+  const data = await OmdbService.getMovie(name);
 
-  if(data['imdbID']) {
-    MOVIES.push(data);
+  if (data["imdbID"]) {
+    movieStore.add(data);
     return response.status(200).json({
-        message: 'Movie added'
+      message: `Movie found and added: ${name}`,
+      data: data,
     });
   }
 
-  return response.status(404).json({message: 'Movie not added'});
+  movieStore.add(request.body);
+  return response.status(200).json({
+    message: `New movie added: ${name}`,
+    data: request.body,
+  });
 });
 
-app.patch('/movies/:id', async (request: Request, response: Response) => {
+app.patch("/movies/:id", async (request: Request, response: Response) => {
+  let id: string = request.params.id;
+  let comment: string = request.body.comment;
+  let personalScore: number = request.body.personalScore;
 
+  const movie = movieStore.findById(id);
+
+  if (!movie) {
+    return response.status(404).json({
+      message: "Movie not found",
+    });
+  }
+
+  movie["comment"] = comment;
+  movie["personalScore"] = personalScore;
+
+  return response.status(200).json({
+    message: `Movie updated: ${movie.Title}`,
+    data: movie,
+  });
+});
+
+app.delete("/movies/:id", (request: Request, response: Response) => {
+  let id: string = request.params.id;
+  const movie = movieStore.findById(id);
+
+  if (!movie) {
+    return response.status(404).json({
+      message: "Movie not found",
+    });
+  }
+
+  movieStore.destroy(movie);
+
+  return response.status(200).json({
+    data: `Deleted OK. ${movie.Title}`,
+    message: movie,
+  });
+});
+
+app.get("/movies", (request: Request, response: Response) => {
+  return response.status(200).json({
+    data: movieStore.movies,
+  });
+});
+
+app.get("/movies/:id", (request: Request, response: Response) => {
+  let id: string = request.params.id;
+  const movie = movieStore.findById(id);
+
+  if (!movie) {
+    return response.status(404).json({
+      message: "Movie not found",
+    });
+  }
+
+  return response.status(200).json({
+    data: movie,
+  });
 });
 
 app.listen(config.APP_PORT, () => {
