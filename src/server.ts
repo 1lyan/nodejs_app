@@ -2,7 +2,7 @@ import express from "express";
 import { Request, Response } from "express";
 import { config } from "./config";
 import { logger } from "./logger";
-import { noAppPortMsg, noEnvMsg, noApiKeyMsg } from "./constants";
+import { noAppPortMsg, noEnvMsg, noApiKeyMsg, defaultScore } from "./constants";
 import OmdbService from "./services/omdbService";
 import MovieStore from "./stores/movieStore";
 
@@ -35,28 +35,45 @@ const listenMessage = `Listening on port: ${config.APP_PORT}. ENV is ${config.EN
  * 5. Get movie by ID
  * */
 app.post("/movies", async (request: Request, response: Response) => {
-  const name = request.body.name;
+  const { name, comment, personalScore } = request.body;
   const data = await OmdbService.getMovie(name);
 
-  if (data["imdbID"]) {
-    movieStore.add(data);
+  // movie not found
+  if (!data["imdbID"]) {
+    // movie not found in IMDB - let's add it to local DB
+    const movie = { imdbID: movieStore.nextId(), ...request.body };
+    movieStore.add(movie);
     return response.status(200).json({
-      message: `Movie found and added: ${name}`,
-      data: data,
+      message: `New movie added: ${name}`,
+      data: movie,
     });
   }
 
-  movieStore.add(request.body);
-  return response.status(200).json({
-    message: `New movie added: ${name}`,
-    data: request.body,
+  // movie already exists in DB
+  if (movieStore.exist(data["imdbID"])) {
+    return response.status(200).json({
+      message: `Movie already exist in DB: ${name}`,
+    });
+  }
+
+  // movie is not in the DB - so let's add it
+  if (!movieStore.exist(data["imdbID"])) {
+    const movie = { ...data, comment, personalScore };
+    movieStore.add(movie);
+    return response.status(200).json({
+      message: `Movie found and added: ${name}`,
+      data: movie,
+    });
+  }
+
+  return response.status(404).json({
+    message: `Movie not found: ${name}`,
   });
 });
 
 app.patch("/movies/:id", async (request: Request, response: Response) => {
   let id: string = request.params.id;
-  let comment: string = request.body.comment;
-  let personalScore: number = request.body.personalScore;
+  const { comment, personalScore } = request.body;
 
   const movie = movieStore.findById(id);
 
@@ -66,8 +83,12 @@ app.patch("/movies/:id", async (request: Request, response: Response) => {
     });
   }
 
-  movie["comment"] = comment;
-  movie["personalScore"] = personalScore;
+  if (comment) {
+    movie["comment"] = comment;
+  }
+  if (personalScore) {
+    movie["personalScore"] = personalScore;
+  }
 
   return response.status(200).json({
     message: `Movie updated: ${movie.Title}`,
