@@ -1,7 +1,7 @@
 class MovieStore {
   movies: Array<any> = [];
 
-  add(movie = Object) {
+  add(movie: Object | {}) {
     this.movies.push(movie);
   }
 
@@ -10,7 +10,7 @@ class MovieStore {
     return movie;
   }
 
-  destroy(movie = Object) {
+  destroy(movie: Object | {}) {
     const index = this.movies.indexOf(movie);
     this.movies.splice(index, 1);
   }

@@ -41,7 +41,7 @@ app.post("/movies", async (request: Request, response: Response) => {
   // movie not found
   if (!data["imdbID"]) {
     // movie not found in IMDB - let's add it to local DB
-    const movie = { imdbID: movieStore.nextId(), ...request.body };
+    const movie = { imdbID: movieStore.nextId(), Title: name, comment, personalScore };
     movieStore.add(movie);
     return response.status(200).json({
       message: `New movie added: ${name}`,
@@ -56,7 +56,7 @@ app.post("/movies", async (request: Request, response: Response) => {
     });
   }
 
-  // movie is not in the DB - so let's add it
+  // movie is found in IMDB but not in local DB - so let's add it
   if (!movieStore.exist(data["imdbID"])) {
     const movie = { ...data, comment, personalScore };
     movieStore.add(movie);
