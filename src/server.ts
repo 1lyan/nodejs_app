@@ -1,5 +1,5 @@
 import express from "express";
-import { Request, Response } from "express";
+import { Request, Response, Router } from "express";
 import { config } from "./config";
 import { logger } from "./logger";
 import {
@@ -11,8 +11,10 @@ import {
 } from "./constants";
 import OmdbService from "./services/omdbService";
 import MovieStore from "./stores/movieStore";
+import { authenticate, authorize, register, login } from "./commands/auth";
 
-const MongoClient = require("mongodb").MongoClient;
+import * as mongoDB from "mongodb";
+const MongoClient = mongoDB.MongoClient;
 
 if (config.API_KEY === undefined) {
   logger.info(noApiKeyMsg);
@@ -32,17 +34,12 @@ if (config.ENV === undefined) {
 const app = express();
 app.use(express.json());
 
+app.use(authenticate);
+
 const movieStore = new MovieStore();
 const listenMessage = `Listening on port: ${config.APP_PORT}. ENV is ${config.ENV}`;
 
-/**
- * 1. Add new movie
- * 2. Update movie by ID
- * 3. Delete movie by ID
- * 4. List all movies
- * 5. Get movie by ID
- * */
-app.post("/movies", async (request: Request, response: Response) => {
+app.post("/movies", authorize, async (request: Request, response: Response) => {
   const client = await MongoClient.connect(DB_URL);
   const db = client.db("moviesDB");
   const collection = db.collection("movies");
@@ -58,25 +55,32 @@ app.post("/movies", async (request: Request, response: Response) => {
       Title: name,
       comment,
       personalScore,
+      user_id: request.requestUser._id,
     };
-    collection.insert(movie);
+    await collection.insertOne(movie);
     return response.status(200).json({
       message: `New movie added: ${name}`,
       data: movie,
     });
   }
 
+  const dbMovie = await collection.findOne({ imdbID: data["imdbID"] });
   // movie already exists in DB
-  if (collection.findOne({ imdbID: data["imdbID"] })) {
+  if (dbMovie) {
     return response.status(200).json({
       message: `Movie already exist in DB: ${name}`,
     });
   }
 
   // movie is found in IMDB but not in local DB - so let's add it
-  if (!collection.findOne({ imdbID: data["imdbID"] })) {
-    const movie = { ...data, comment, personalScore };
-    collection.insert(movie);
+  if (!dbMovie) {
+    const movie = {
+      ...data,
+      comment,
+      personalScore,
+      user_id: request.requestUser._id,
+    };
+    await collection.insertOne(movie);
     return response.status(200).json({
       message: `Movie found and added: ${name}`,
       data: movie,
@@ -88,89 +92,143 @@ app.post("/movies", async (request: Request, response: Response) => {
   });
 });
 
-app.patch("/movies/:id", async (request: Request, response: Response) => {
-  const client = await MongoClient.connect(DB_URL);
-  const db = client.db("moviesDB");
-  const collection = db.collection("movies");
+app.patch(
+  "/movies/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const client = await MongoClient.connect(DB_URL);
+    const db = client.db("moviesDB");
+    const collection = db.collection("movies");
 
-  let id: string = request.params.id;
-  const { comment, personalScore } = request.body;
+    let id: string = request.params.id;
+    const { comment, personalScore } = request.body;
 
-  const movie = await collection.findOne({ imdbID: id });
+    const movie = await collection.findOne({ imdbID: id });
 
-  if (!movie) {
-    return response.status(404).json({
-      message: "Movie not found",
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
+
+    const updateFields: { [k: string]: any } = {};
+    if (comment) {
+      updateFields["comment"] = comment;
+    }
+    if (personalScore) {
+      updateFields["personalScore"] = personalScore;
+    }
+
+    await collection.updateOne({ imdbID: id }, { $set: updateFields });
+    return response.status(200).json({
+      message: `Movie updated: ${movie.Title}`,
+      data: movie,
     });
   }
+);
 
-  const updateFields: { [k: string]: any } = {};
-  if (comment) {
-    updateFields["comment"] = comment;
-  }
-  if (personalScore) {
-    updateFields["personalScore"] = personalScore;
-  }
+app.patch(
+  "/like_movie/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const client = await MongoClient.connect(DB_URL);
+    const db = client.db("moviesDB");
+    const collection = db.collection("movies");
+    const users = db.collection("users");
+    const user = request.requestUser;
 
-  await collection.updateOne({ imdbID: id }, { $set: updateFields });
-  console.log("MOVIE", movie);
-  return response.status(200).json({
-    message: `Movie updated: ${movie.Title}`,
-    data: movie,
-  });
-});
+    let id: string = request.params.id;
+    const movie = await collection.findOne({ imdbID: id });
 
-app.delete("/movies/:id", async (request: Request, response: Response) => {
-  const client = await MongoClient.connect(DB_URL);
-  const db = client.db("moviesDB");
-  const collection = db.collection("movies");
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
 
-  let id: string = request.params.id;
-  const movie = await collection.findOne({ imdbID: id });
+    user.favMovies.push(movie["imdbID"]);
+    await users.updateOne(
+      { _id: user._id },
+      { $set: { favMovies: user.favMovies } }
+    );
 
-  if (!movie) {
-    return response.status(404).json({
-      message: "Movie not found",
+    return response.status(200).json({
+      message: `Favorite list updated`,
     });
   }
+);
 
-  collection.deleteOne({ imdbID: id });
+app.delete(
+  "/movies/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const client = await MongoClient.connect(DB_URL);
+    const db = client.db("moviesDB");
+    const collection = db.collection("movies");
 
-  return response.status(200).json({
-    data: `Deleted OK. ${movie.Title}`,
-    message: movie,
-  });
-});
+    let id: string = request.params.id;
+    const movie = await collection.findOne({ imdbID: id });
 
-app.get("/movies", async (request: Request, response: Response) => {
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
+
+    await collection.deleteOne({ imdbID: id });
+
+    return response.status(200).json({
+      data: `Deleted OK. ${movie.Title}`,
+      message: movie,
+    });
+  }
+);
+
+app.get("/movies", authorize, async (request: Request, response: Response) => {
   const client = await MongoClient.connect(DB_URL);
   const db = client.db("moviesDB");
   const collection = db.collection("movies");
+  const user = request.requestUser;
 
-  const movies = await collection.find().toArray();
+  console.log("IDS", user.favMovies);
+  const movies = await collection
+    .find({ imdbID: { $in: user.favMovies } })
+    .toArray();
   return response.status(200).json({
     data: movies,
   });
 });
 
-app.get("/movies/:id", async (request: Request, response: Response) => {
-  const client = await MongoClient.connect(DB_URL);
-  const db = client.db("moviesDB");
-  const collection = db.collection("movies");
+app.get(
+  "/movies/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const client = await MongoClient.connect(DB_URL);
+    const db = client.db("moviesDB");
+    const collection = db.collection("movies");
 
-  let id: string = request.params.id;
-  const movie = await collection.findOne({ imdbID: id });
+    let id: string = request.params.id;
+    const movie = await collection.findOne({ imdbID: id });
 
-  if (!movie) {
-    return response.status(404).json({
-      message: "Movie not found",
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
+
+    return response.status(200).json({
+      data: movie,
     });
   }
+);
 
-  return response.status(200).json({
-    data: movie,
-  });
-});
+const authRouter = express.Router();
+
+authRouter.post("/registration", register);
+
+authRouter.post("/login", login);
+
+app.use("/auth", authRouter);
 
 app.listen(config.APP_PORT, () => {
   logger.info(listenMessage);

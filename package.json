@@ -30,7 +30,9 @@
   },
   "dependencies": {
     "@types/axios": "^0.14.0",
+    "@types/jsonwebtoken": "^8.5.6",
     "axios": "^0.24.0",
+    "jsonwebtoken": "^8.5.1",
     "mongodb": "^4.2.0",
     "nodemon": "^2.0.15",
     "ts-node": "^10.4.0"
