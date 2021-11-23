@@ -104,3 +104,4 @@ dist
 .tern-port
 private.key
 public.key
+.DS_Store
