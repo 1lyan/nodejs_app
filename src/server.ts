@@ -1,20 +1,16 @@
 import express from "express";
-import { Request, Response, Router } from "express";
+import { Request, Response } from "express";
 import { config } from "./config";
 import { logger } from "./logger";
 import {
   noAppPortMsg,
   noEnvMsg,
   noApiKeyMsg,
-  defaultScore,
-  DB_URL,
 } from "./constants";
 import OmdbService from "./services/omdbService";
-import MovieStore from "./stores/movieStore";
 import { authenticate, authorize, register, login } from "./commands/auth";
 
-import * as mongoDB from "mongodb";
-const MongoClient = mongoDB.MongoClient;
+import { movies, users, nextId } from "./services/db";
 
 if (config.API_KEY === undefined) {
   logger.info(noApiKeyMsg);
@@ -36,26 +32,25 @@ app.use(express.json());
 
 app.use(authenticate);
 
-const movieStore = new MovieStore();
 const listenMessage = `Listening on port: ${config.APP_PORT}. ENV is ${config.ENV}`;
 
-app.post("/movies", authorize, async (request: Request, response: Response) => {
-  const client = await MongoClient.connect(DB_URL);
-  const db = client.db("moviesDB");
-  const collection = db.collection("movies");
+app.post("/movies", async (request: Request, response: Response) => {
+  const collection = await movies();
+  const user = request.requestUser;
 
   const { name, comment, personalScore } = request.body;
   const data = await OmdbService.getMovie(name);
+  let movie = {};
 
   // movie not found
   if (!data["imdbID"]) {
     // movie not found in IMDB - let's add it to local DB
-    const movie = {
-      imdbID: movieStore.nextId(),
+    movie = {
+      imdbID: nextId(),
       Title: name,
       comment,
       personalScore,
-      user_id: request.requestUser._id,
+      user_id: user._id,
     };
     await collection.insertOne(movie);
     return response.status(200).json({
@@ -74,12 +69,7 @@ app.post("/movies", authorize, async (request: Request, response: Response) => {
 
   // movie is found in IMDB but not in local DB - so let's add it
   if (!dbMovie) {
-    const movie = {
-      ...data,
-      comment,
-      personalScore,
-      user_id: request.requestUser._id,
-    };
+    movie = { ...data, comment, personalScore, user_id: user._id };
     await collection.insertOne(movie);
     return response.status(200).json({
       message: `Movie found and added: ${name}`,
@@ -96,9 +86,7 @@ app.patch(
   "/movies/:id",
   authorize,
   async (request: Request, response: Response) => {
-    const client = await MongoClient.connect(DB_URL);
-    const db = client.db("moviesDB");
-    const collection = db.collection("movies");
+    const collection = await movies();
 
     let id: string = request.params.id;
     const { comment, personalScore } = request.body;
@@ -121,8 +109,7 @@ app.patch(
 
     await collection.updateOne({ imdbID: id }, { $set: updateFields });
     return response.status(200).json({
-      message: `Movie updated: ${movie.Title}`,
-      data: movie,
+      message: `Movie updated: ${movie.Title}`
     });
   }
 );
@@ -131,14 +118,12 @@ app.patch(
   "/like_movie/:id",
   authorize,
   async (request: Request, response: Response) => {
-    const client = await MongoClient.connect(DB_URL);
-    const db = client.db("moviesDB");
-    const collection = db.collection("movies");
-    const users = db.collection("users");
+    const _movies = await movies();
+    const _users = await users();
     const user = request.requestUser;
 
     let id: string = request.params.id;
-    const movie = await collection.findOne({ imdbID: id });
+    const movie = await _movies.findOne({ imdbID: id });
 
     if (!movie) {
       return response.status(404).json({
@@ -147,7 +132,7 @@ app.patch(
     }
 
     user.favMovies.push(movie["imdbID"]);
-    await users.updateOne(
+    await _users.updateOne(
       { _id: user._id },
       { $set: { favMovies: user.favMovies } }
     );
@@ -162,9 +147,7 @@ app.delete(
   "/movies/:id",
   authorize,
   async (request: Request, response: Response) => {
-    const client = await MongoClient.connect(DB_URL);
-    const db = client.db("moviesDB");
-    const collection = db.collection("movies");
+    const collection = await movies();
 
     let id: string = request.params.id;
     const movie = await collection.findOne({ imdbID: id });
@@ -185,17 +168,12 @@ app.delete(
 );
 
 app.get("/movies", authorize, async (request: Request, response: Response) => {
-  const client = await MongoClient.connect(DB_URL);
-  const db = client.db("moviesDB");
-  const collection = db.collection("movies");
+  const collection = await movies();
   const user = request.requestUser;
 
-  console.log("IDS", user.favMovies);
-  const movies = await collection
-    .find({ imdbID: { $in: user.favMovies } })
-    .toArray();
+  const items = await collection.find({ imdbID: { $in: user.favMovies } }).toArray();
   return response.status(200).json({
-    data: movies,
+    data: items,
   });
 });
 
@@ -203,9 +181,7 @@ app.get(
   "/movies/:id",
   authorize,
   async (request: Request, response: Response) => {
-    const client = await MongoClient.connect(DB_URL);
-    const db = client.db("moviesDB");
-    const collection = db.collection("movies");
+    const collection = await movies();
 
     let id: string = request.params.id;
     const movie = await collection.findOne({ imdbID: id });
