@@ -12,3 +12,7 @@ export const users = async () => {
   const db = client.db("moviesDB");
   return db.collection("users");
 };
+
+export const nextId = () => {
+  return new Date().getTime().toString(35);
+}

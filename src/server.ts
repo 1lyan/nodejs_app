@@ -6,13 +6,11 @@ import {
   noAppPortMsg,
   noEnvMsg,
   noApiKeyMsg,
-  defaultScore,
-  DB_URL,
 } from "./constants";
 import OmdbService from "./services/omdbService";
-import MovieStore from "./stores/movieStore";
+import { authenticate, authorize, register, login } from "./commands/auth";
 
-import { movies } from "./services/db";
+import { movies, users, nextId } from "./services/db";
 
 if (config.API_KEY === undefined) {
   logger.info(noApiKeyMsg);
@@ -32,18 +30,13 @@ if (config.ENV === undefined) {
 const app = express();
 app.use(express.json());
 
-const movieStore = new MovieStore();
+app.use(authenticate);
+
 const listenMessage = `Listening on port: ${config.APP_PORT}. ENV is ${config.ENV}`;
 
-/**
- * 1. Add new movie
- * 2. Update movie by ID
- * 3. Delete movie by ID
- * 4. List all movies
- * 5. Get movie by ID
- * */
 app.post("/movies", async (request: Request, response: Response) => {
   const collection = await movies();
+  const user = request.requestUser;
 
   const { name, comment, personalScore } = request.body;
   const data = await OmdbService.getMovie(name);
@@ -53,10 +46,11 @@ app.post("/movies", async (request: Request, response: Response) => {
   if (!data["imdbID"]) {
     // movie not found in IMDB - let's add it to local DB
     movie = {
-      imdbID: movieStore.nextId(),
+      imdbID: nextId(),
       Title: name,
       comment,
       personalScore,
+      user_id: user._id,
     };
     await collection.insertOne(movie);
     return response.status(200).json({
@@ -75,7 +69,7 @@ app.post("/movies", async (request: Request, response: Response) => {
 
   // movie is found in IMDB but not in local DB - so let's add it
   if (!dbMovie) {
-    movie = { ...data, comment, personalScore };
+    movie = { ...data, comment, personalScore, user_id: user._id };
     await collection.insertOne(movie);
     return response.status(200).json({
       message: `Movie found and added: ${name}`,
@@ -88,79 +82,129 @@ app.post("/movies", async (request: Request, response: Response) => {
   });
 });
 
-app.patch("/movies/:id", async (request: Request, response: Response) => {
-  const collection = await movies();
+app.patch(
+  "/movies/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const collection = await movies();
 
-  let id: string = request.params.id;
-  const { comment, personalScore } = request.body;
+    let id: string = request.params.id;
+    const { comment, personalScore } = request.body;
 
-  const movie = await collection.findOne({ imdbID: id });
+    const movie = await collection.findOne({ imdbID: id });
 
-  if (!movie) {
-    return response.status(404).json({
-      message: "Movie not found",
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
+
+    const updateFields: { [k: string]: any } = {};
+    if (comment) {
+      updateFields["comment"] = comment;
+    }
+    if (personalScore) {
+      updateFields["personalScore"] = personalScore;
+    }
+
+    await collection.updateOne({ imdbID: id }, { $set: updateFields });
+    return response.status(200).json({
+      message: `Movie updated: ${movie.Title}`
     });
   }
+);
 
-  const updateFields: { [k: string]: any } = {};
-  if (comment) {
-    updateFields["comment"] = comment;
-  }
-  if (personalScore) {
-    updateFields["personalScore"] = personalScore;
-  }
+app.patch(
+  "/like_movie/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const _movies = await movies();
+    const _users = await users();
+    const user = request.requestUser;
 
-  await collection.updateOne({ imdbID: id }, { $set: updateFields });
-  return response.status(200).json({
-    message: `Movie updated: ${movie.Title}`,
-  });
-});
+    let id: string = request.params.id;
+    const movie = await _movies.findOne({ imdbID: id });
 
-app.delete("/movies/:id", async (request: Request, response: Response) => {
-  const collection = await movies();
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
 
-  let id: string = request.params.id;
-  const movie = await collection.findOne({ imdbID: id });
+    user.favMovies.push(movie["imdbID"]);
+    await _users.updateOne(
+      { _id: user._id },
+      { $set: { favMovies: user.favMovies } }
+    );
 
-  if (!movie) {
-    return response.status(404).json({
-      message: "Movie not found",
+    return response.status(200).json({
+      message: `Favorite list updated`,
     });
   }
+);
 
-  await collection.deleteOne({ imdbID: id });
+app.delete(
+  "/movies/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const collection = await movies();
 
-  return response.status(200).json({
-    data: `Deleted OK. ${movie.Title}`,
-    message: movie,
-  });
-});
+    let id: string = request.params.id;
+    const movie = await collection.findOne({ imdbID: id });
 
-app.get("/movies", async (request: Request, response: Response) => {
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
+
+    await collection.deleteOne({ imdbID: id });
+
+    return response.status(200).json({
+      data: `Deleted OK. ${movie.Title}`,
+      message: movie,
+    });
+  }
+);
+
+app.get("/movies", authorize, async (request: Request, response: Response) => {
   const collection = await movies();
+  const user = request.requestUser;
 
-  const items = await collection.find().toArray();
+  const items = await collection.find({ imdbID: { $in: user.favMovies } }).toArray();
   return response.status(200).json({
     data: items,
   });
 });
 
-app.get("/movies/:id", async (request: Request, response: Response) => {
-  const collection = await movies();
+app.get(
+  "/movies/:id",
+  authorize,
+  async (request: Request, response: Response) => {
+    const collection = await movies();
 
-  let id: string = request.params.id;
-  const movie = await collection.findOne({ imdbID: id });
+    let id: string = request.params.id;
+    const movie = await collection.findOne({ imdbID: id });
 
-  if (!movie) {
-    return response.status(404).json({
-      message: "Movie not found",
+    if (!movie) {
+      return response.status(404).json({
+        message: "Movie not found",
+      });
+    }
+
+    return response.status(200).json({
+      data: movie,
     });
   }
+);
 
-  return response.status(200).json({
-    data: movie,
-  });
-});
+const authRouter = express.Router();
+
+authRouter.post("/registration", register);
+
+authRouter.post("/login", login);
+
+app.use("/auth", authRouter);
 
 app.listen(config.APP_PORT, () => {
   logger.info(listenMessage);
